@@ -180,6 +180,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.81"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0952808a6c2afd1aa8947271f3a60f1a6763c7b912d210184c5149b5cf147247"
+
+[[package]]
 name = "approx"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -722,6 +728,7 @@ dependencies = [
 name = "bevy_net_dev"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bevy",
  "bevy_replicon",
  "bevy_replicon_renet",
@@ -1979,7 +1986,7 @@ dependencies = [
  "vec_map",
  "wasm-bindgen",
  "web-sys",
- "windows 0.48.0",
+ "windows 0.54.0",
 ]
 
 [[package]]
