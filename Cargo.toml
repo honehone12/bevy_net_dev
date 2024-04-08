@@ -1,0 +1,12 @@
+[package]
+name = "bevy_net_dev"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bevy_replicon_snap = { version = "0.2.1", path = "../bevy_replicon_snap" }
+bevy_replicon_renet = { version = "0.1.0", path = "../bevy_replicon/bevy_replicon_renet" }
+bevy_replicon = { version = "0.24.1", path = "../bevy_replicon" }
+bevy = { version = "0.13.1" }
