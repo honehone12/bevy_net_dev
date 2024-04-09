@@ -1,4 +1,4 @@
-use std::{net::{SocketAddr, UdpSocket}, time::SystemTime};
+use std::{net::{IpAddr, SocketAddr, UdpSocket}, time::SystemTime};
 use bevy::prelude::*;
 use bevy_replicon::prelude::*;
 use bevy_replicon_renet::{
@@ -9,74 +9,48 @@ use bevy_replicon_renet::{
     RenetChannelsExt, RepliconRenetClientPlugin, RepliconRenetPlugins
 };
 use bevy_replicon_snap::SnapshotInterpolationPlugin;
-use crate::netstack::{
-    transport::TransportParams,
-    error::{NetStackError, on_transport_error_system}
-};
+use super::error::{NetstackError, on_transport_error_system};
+use anyhow::anyhow;
 
-#[derive(Clone)]
+#[derive(Resource)]
 pub struct ServerParams {
-    pub network_tick_rate: u16,
-    pub max_clients: usize,
+    pub listen_addr: IpAddr,
+    pub listen_port: u16,
+    pub protocol_id: u64,
+    pub private_key: [u8; 32],
+    pub max_clients: usize
 }
 
+#[derive(Resource)]
+pub struct Server;
+
 pub struct ServerNetstackPlugin {
-    pub server_params: ServerParams,
-    pub transport_params: TransportParams
+    pub network_tick_rate: u16,
 }
 
 impl Plugin for ServerNetstackPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             RepliconPlugins.build().disable::<ClientPlugin>().set(ServerPlugin{
-                tick_policy: TickPolicy::MaxTickRate(self.server_params.network_tick_rate),
+                tick_policy: TickPolicy::MaxTickRate(self.network_tick_rate),
                 ..default()
             }),
             RepliconRenetPlugins.build().disable::<RepliconRenetClientPlugin>(),
             SnapshotInterpolationPlugin{
-                max_tick_rate: self.server_params.network_tick_rate
+                max_tick_rate: self.network_tick_rate
             }
         ))
-        .insert_resource(Server{
-            params: self.server_params.clone()
-        })
-        .insert_resource(ServerTransport{
-            params: self.transport_params.clone()
-        })
-        .add_event::<NetStackError>()
+        .add_event::<NetstackError>()
         .add_systems(Startup, setup_server)
         .add_systems(Update, on_transport_error_system);
     }
 }
 
-#[derive(Resource)]
-pub struct Server {
-    params: ServerParams
-}
-
-impl Server {
-    #[inline]
-    pub fn get_network_tick_rate(&self) -> u16 {
-        self.params.network_tick_rate
-    }
-
-    #[inline]
-    pub fn get_max_clients(&self) -> usize {
-        self.params.max_clients
-    }
-}
-
-#[derive(Resource)]
-struct ServerTransport {
-    params: TransportParams
-}
-
 fn setup_server(
     mut commands: Commands, 
     net_channels: Res<RepliconChannels>,
-    transport: Res<ServerTransport>,
-    server: Res<Server>,
-    mut error: EventWriter<NetStackError>
+    params: Res<ServerParams>,
+    mut error: EventWriter<NetstackError>
 ) {
     let renet_server = RenetServer::new(ConnectionConfig{
         server_channels_config: net_channels.get_server_configs(),
@@ -84,32 +58,33 @@ fn setup_server(
         ..default()
     });
 
-    let netcode_transport = match setup_transport(&server, &transport) {
+    let netcode_transport = match setup_transport(&params) {
         Ok(t) => t,
         Err(e) => {
-            error.send(NetStackError{
-                error: anyhow::anyhow!(e.to_string())
+            error.send(NetstackError{
+                error: anyhow!(e.to_string())
             });
             return;
         }
     };
 
-    commands.remove_resource::<ServerTransport>(); 
+    commands.remove_resource::<ServerParams>();
+    commands.insert_resource(Server); 
     commands.insert_resource(renet_server);
     commands.insert_resource(netcode_transport);
 }
 
-fn setup_transport(server: &Server, transport: &ServerTransport) 
+fn setup_transport(params: &ServerParams) 
 -> anyhow::Result<NetcodeServerTransport> {
-    let listen_addr = SocketAddr::new(transport.params.addr, transport.params.port);
+    let listen_addr = SocketAddr::new(params.listen_addr, params.listen_port);
     let socket = UdpSocket::bind(listen_addr)?;
     let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
     let netcode_transport = NetcodeServerTransport::new(ServerConfig{
         current_time,
-        max_clients: server.params.max_clients,
-        protocol_id: transport.params.protocol_id,
+        max_clients: params.max_clients,
+        protocol_id: params.protocol_id,
         authentication: ServerAuthentication::Secure{ 
-            private_key: transport.params.private_key
+            private_key: params.private_key
         },
         public_addresses: vec![listen_addr]
     }, socket)?;

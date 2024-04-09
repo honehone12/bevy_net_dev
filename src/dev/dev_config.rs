@@ -5,6 +5,9 @@ pub const DEV_NETWORK_TICK_RATE: u16 = 30;
 pub const DEV_SERVER_LISTEN_PORT: u16 = 5000;
 pub const DEV_SERVER_MAX_CLIENTS: usize = 10;
 
+pub const DEV_CLIENT_TIME_OUT_SEC: i32 = 15;
+pub const DEV_TOKEN_EXPIRE_SEC: u64 = 300;
+
 pub fn get_dev_protocol_id() -> u64 {
     if cfg!(debug_assertions) {
         0x655ea1eecade99ad
