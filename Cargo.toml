@@ -11,3 +11,4 @@ bevy_replicon_renet = { version = "0.1.0", path = "../bevy_replicon/bevy_replico
 bevy_replicon = { version = "0.24.1", path = "../bevy_replicon" }
 bevy = { version = "0.13.1" }
 anyhow = "1.0.81"
+serde = "1.0.197"

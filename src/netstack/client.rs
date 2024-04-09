@@ -49,7 +49,7 @@ pub fn setup_client(
     mut commands: Commands,
     net_channels: Res<RepliconChannels>,
     params: Res<ClientParams>,
-    mut error: EventWriter<NetstackError>
+    mut errors: EventWriter<NetstackError>
 ) {
     let renet_client = RenetClient::new(ConnectionConfig{
         server_channels_config: net_channels.get_server_configs(),
@@ -60,9 +60,7 @@ pub fn setup_client(
     let netcode_transport = match setup_transport(&params) {
         Ok(t) => t,
         Err(e) => {
-            error.send(NetstackError{
-                error: anyhow!(e.to_string())
-            });
+            errors.send(NetstackError(anyhow!("{e}")));
             return;
         }
     };

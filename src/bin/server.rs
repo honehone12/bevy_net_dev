@@ -4,7 +4,7 @@ use bevy_net_dev::{
     dev::dev_config::*, 
     netstack::{
         server::{ServerNetstackPlugin, ServerParams},
-        error::panic_on_error_system
+        error::panic_on_net_error_system
     }
 };
 
@@ -28,6 +28,6 @@ fn main() {
             max_clients: DEV_SERVER_MAX_CLIENTS,
         }
     )
-    .add_systems(Update, panic_on_error_system)
+    .add_systems(Update, panic_on_net_error_system)
     .run();
 }

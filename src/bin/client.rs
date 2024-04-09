@@ -4,7 +4,7 @@ use bevy_net_dev::{
     dev::{dev_config::*, level::LevelPlugin}, 
     netstack::{
         client::{setup_client, ClientNetstackPlugin, ClientParams}, 
-        error::panic_on_error_system
+        error::panic_on_net_error_system
     }
 };
 
@@ -28,6 +28,6 @@ fn main() {
         token_expire_seconds: DEV_TOKEN_EXPIRE_SEC,
     })
     .add_systems(Startup, setup_client)
-    .add_systems(Update, panic_on_error_system)
+    .add_systems(Update, panic_on_net_error_system)
     .run();
 }

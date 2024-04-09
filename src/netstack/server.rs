@@ -9,7 +9,7 @@ use bevy_replicon_renet::{
     RenetChannelsExt, RepliconRenetClientPlugin, RepliconRenetPlugins
 };
 use bevy_replicon_snap::SnapshotInterpolationPlugin;
-use super::error::{NetstackError, on_transport_error_system};
+use super::{error::{on_transport_error_system, NetstackError}, net_resources::{OwnedEntityMap, PlayerEntityMap}};
 use anyhow::anyhow;
 
 #[derive(Resource)]
@@ -41,8 +41,13 @@ impl Plugin for ServerNetstackPlugin {
             }
         ))
         .add_event::<NetstackError>()
+        .init_resource::<PlayerEntityMap>()
+        .init_resource::<OwnedEntityMap>()
         .add_systems(Startup, setup_server)
-        .add_systems(Update, on_transport_error_system);
+        .add_systems(Update, (
+            handle_server_event_system,
+            on_transport_error_system
+        ));
     }
 }
 
@@ -50,7 +55,7 @@ fn setup_server(
     mut commands: Commands, 
     net_channels: Res<RepliconChannels>,
     params: Res<ServerParams>,
-    mut error: EventWriter<NetstackError>
+    mut errors: EventWriter<NetstackError>
 ) {
     let renet_server = RenetServer::new(ConnectionConfig{
         server_channels_config: net_channels.get_server_configs(),
@@ -61,13 +66,12 @@ fn setup_server(
     let netcode_transport = match setup_transport(&params) {
         Ok(t) => t,
         Err(e) => {
-            error.send(NetstackError{
-                error: anyhow!(e.to_string())
-            });
+            errors.send(NetstackError(anyhow!("{e}")));
             return;
         }
     };
 
+    info!("server is listening at {}:{}", params.listen_addr, params.listen_port);
     commands.remove_resource::<ServerParams>();
     commands.insert_resource(Server); 
     commands.insert_resource(renet_server);
@@ -89,4 +93,20 @@ fn setup_transport(params: &ServerParams)
         public_addresses: vec![listen_addr]
     }, socket)?;
     Ok(netcode_transport)
+}
+
+fn handle_server_event_system(
+    mut commands: Commands,
+    mut events: EventReader<ServerEvent>
+) {
+    for e in events.read() {
+        match e {
+            ServerEvent::ClientConnected { client_id } => {
+                info!("client: {client_id:?} connected");
+            }
+            ServerEvent::ClientDisconnected { client_id, reason } => {
+                info!("client: {client_id:?} disconnected with reason: {reason}");
+            }
+        }
+    }
 }

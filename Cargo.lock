@@ -733,6 +733,7 @@ dependencies = [
  "bevy_replicon",
  "bevy_replicon_renet",
  "bevy_replicon_snap",
+ "serde",
 ]
 
 [[package]]
