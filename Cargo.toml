@@ -12,3 +12,4 @@ bevy_replicon = { version = "0.24.1", path = "../bevy_replicon" }
 bevy = { version = "0.13.1" }
 anyhow = "1.0.81"
 serde = "1.0.197"
+rand = "0.8.5"

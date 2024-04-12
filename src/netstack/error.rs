@@ -6,7 +6,7 @@ pub struct NetstackError(pub anyhow::Error);
 
 pub fn panic_on_net_error_system(mut error: EventReader<NetstackError>) {
     for e in error.read() {
-        panic!("{}", e.0);
+        panic!("netstack error: consider error handling without panic: {}", e.0);
     }
 }
 

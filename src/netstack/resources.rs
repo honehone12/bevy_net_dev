@@ -2,6 +2,7 @@ use bevy::{prelude::*, utils::HashMap};
 use bevy_replicon::core::ClientId;
 use anyhow::bail;
 
+// map for entity with network player component
 #[derive(Resource, Default)]
 pub struct PlayerEntityMap(HashMap<ClientId, Entity>);
 
@@ -26,6 +27,7 @@ impl PlayerEntityMap {
     }
 }
 
+// map for entities owned by client id
 #[derive(Resource, Default)]
 pub struct OwnedEntityMap(HashMap<ClientId, Vec<Entity>>);
 

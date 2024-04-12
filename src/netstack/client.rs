@@ -9,8 +9,10 @@ use bevy_replicon_renet::{
     RenetChannelsExt, RepliconRenetPlugins, RepliconRenetServerPlugin
 };
 use bevy_replicon_snap::SnapshotInterpolationPlugin;
-use super::error::{on_transport_error_system, NetstackError};
-use anyhow::anyhow;
+use super::{
+    components::NetworkPlayer, 
+    error::{on_transport_error_system, NetstackError}
+};
 
 #[derive(Resource)]
 pub struct ClientParams {
@@ -18,6 +20,7 @@ pub struct ClientParams {
     pub server_addr: IpAddr,
     pub server_port: u16,
     pub timeout_seconds: i32,
+    pub client_id: u64,
     pub protocol_id: u64,
     pub private_key: [u8; 32],
     pub user_data: [u8; 256],
@@ -41,6 +44,7 @@ impl Plugin for ClientNetstackPlugin {
             }
         ))
         .add_event::<NetstackError>()
+        .replicate::<NetworkPlayer>()
         .add_systems(Update, on_transport_error_system);
     }
 }
@@ -60,7 +64,7 @@ pub fn setup_client(
     let netcode_transport = match setup_transport(&params) {
         Ok(t) => t,
         Err(e) => {
-            errors.send(NetstackError(anyhow!("{e}")));
+            errors.send(NetstackError(e));
             return;
         }
     };
@@ -74,13 +78,12 @@ pub fn setup_client(
 fn setup_transport(params: &ClientParams) 
 -> anyhow::Result<NetcodeClientTransport> {
     let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
-    let client_id = current_time.as_millis() as u64;
     let socket = UdpSocket::bind((params.client_addr, 0))?;
     let connect_token = ConnectToken::generate(
         current_time,
         params.protocol_id,
         params.token_expire_seconds,
-        client_id,
+        params.client_id,
         params.timeout_seconds,
         vec![SocketAddr::new(params.server_addr, params.server_port)],
         Some(&params.user_data),

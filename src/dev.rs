@@ -1,2 +1,3 @@
 pub mod level;
-pub mod dev_config;
+pub mod config;
+pub mod game;

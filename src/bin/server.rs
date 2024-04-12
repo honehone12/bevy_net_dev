@@ -1,10 +1,14 @@
 use std::{net::{IpAddr, Ipv4Addr}, time::Duration};
 use bevy::{app::ScheduleRunnerPlugin, log::LogPlugin, prelude::*};
 use bevy_net_dev::{
-    dev::dev_config::*, 
-    netstack::{
-        server::{ServerNetstackPlugin, ServerParams},
-        error::panic_on_net_error_system
+    dev::{
+        config::*, 
+        game::GamePlugin, 
+        
+    },
+    netstack::{ 
+        error::panic_on_net_error_system,
+        server::{ServerNetstackPlugin, ServerParams}
     }
 };
 
@@ -14,11 +18,12 @@ fn main() {
         MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(
             Duration::from_secs_f32(DEV_SERVER_TICK_DELTA)
         )),
-        LogPlugin::default()
+        LogPlugin::default(),
+        ServerNetstackPlugin{
+            network_tick_rate: DEV_NETWORK_TICK_RATE
+        }
     ))
-    .add_plugins(ServerNetstackPlugin{
-        network_tick_rate: DEV_NETWORK_TICK_RATE
-    })
+    .add_plugins(GamePlugin)
     .insert_resource(
         ServerParams{
             listen_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),

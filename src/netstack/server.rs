@@ -1,5 +1,5 @@
 use std::{net::{IpAddr, SocketAddr, UdpSocket}, time::SystemTime};
-use bevy::prelude::*;
+use bevy::{prelude::*, utils::Uuid};
 use bevy_replicon::prelude::*;
 use bevy_replicon_renet::{
     renet::{
@@ -8,8 +8,13 @@ use bevy_replicon_renet::{
     }, 
     RenetChannelsExt, RepliconRenetClientPlugin, RepliconRenetPlugins
 };
+use bevy_replicon_renet::renet::ClientId as RenetClientId;
 use bevy_replicon_snap::SnapshotInterpolationPlugin;
-use super::{error::{on_transport_error_system, NetstackError}, net_resources::{OwnedEntityMap, PlayerEntityMap}};
+use super::{
+    components::{ServerNetworkPlayerInfo, NetworkPlayer}, 
+    error::{on_transport_error_system, NetstackError}, 
+    resources::{OwnedEntityMap, PlayerEntityMap}
+};
 use anyhow::anyhow;
 
 #[derive(Resource)]
@@ -43,6 +48,7 @@ impl Plugin for ServerNetstackPlugin {
         .add_event::<NetstackError>()
         .init_resource::<PlayerEntityMap>()
         .init_resource::<OwnedEntityMap>()
+        .replicate::<NetworkPlayer>()
         .add_systems(Startup, setup_server)
         .add_systems(Update, (
             handle_server_event_system,
@@ -66,7 +72,7 @@ fn setup_server(
     let netcode_transport = match setup_transport(&params) {
         Ok(t) => t,
         Err(e) => {
-            errors.send(NetstackError(anyhow!("{e}")));
+            errors.send(NetstackError(e));
             return;
         }
     };
@@ -97,14 +103,56 @@ fn setup_transport(params: &ServerParams)
 
 fn handle_server_event_system(
     mut commands: Commands,
-    mut events: EventReader<ServerEvent>
+    mut events: EventReader<ServerEvent>,
+    mut palyer_entities: ResMut<PlayerEntityMap>,
+    netcode_server: Res<NetcodeServerTransport>, 
+    mut errors: EventWriter<NetstackError> 
 ) {
     for e in events.read() {
         match e {
             ServerEvent::ClientConnected { client_id } => {
-                info!("client: {client_id:?} connected");
+                let user_data = match netcode_server.user_data(
+                    RenetClientId::from_raw(client_id.get())
+                ) {
+                    Some(u) => u,
+                    None => {
+                        errors.send(NetstackError(
+                            anyhow!("no user data for this client: {client_id:?}")
+                        ));
+                        return;
+                    }
+                };
+
+                let uuid = match Uuid::from_slice(&user_data[0..16]) {
+                    Ok(u) => u,
+                    Err(e) => {
+                        errors.send(NetstackError(e.into()));
+                        return;
+                    }
+                };
+
+                let entity = commands
+                    .spawn((
+                        ServerNetworkPlayerInfo::new(uuid),
+                        NetworkPlayer::new(*client_id)
+                    ))
+                    .id();
+                match palyer_entities.try_insert(*client_id, entity) {
+                    Ok(()) => (),
+                    Err(e) => {
+                        errors.send(NetstackError(e));
+                    }
+                }                
+                info!("client: {client_id:?} id: {uuid} connected");
             }
             ServerEvent::ClientDisconnected { client_id, reason } => {
+                match palyer_entities.get(client_id) {
+                    Some(e) => {
+                        commands.entity(*e).despawn();
+                        palyer_entities.remove(client_id);
+                    }
+                    None => ()
+                }
                 info!("client: {client_id:?} disconnected with reason: {reason}");
             }
         }
