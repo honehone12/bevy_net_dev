@@ -51,3 +51,5 @@ pub fn get_dev_user_data() -> [u8; 256] {
         panic!("do not use dev user data")
     }
 }
+
+pub const DEV_MAX_BUFFER_SIZE: usize = 100;

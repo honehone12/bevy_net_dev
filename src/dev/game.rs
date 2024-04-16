@@ -1,7 +1,7 @@
-use bevy::prelude::*;
+use bevy::{ecs::query::QuerySingleError, prelude::*};
 use bevy_replicon::{client::ServerEntityTicks, core::replicon_tick::RepliconTick, prelude::*};
 use bevy_replicon_snap::{
-    AppInterpolationExt, Interpolated, Predicted, PredictedEventHistory, SnapshotBuffer
+    RepliconSnapExt, ComponentSnapshotBuffer, Interpolated, Predicted, PredictedEventHistory
 };
 use serde::{Serialize, Deserialize};
 use rand::prelude::*;
@@ -153,7 +153,8 @@ fn on_player_spawned_server_system(
             MinimalNetworkTransform::default(), 
             OwnerControlled::new(p.client_id().get()),
             PlayerPresentation::from_rand_color()
-        ));
+        ))
+        .log_components();
     }
 }
 
@@ -183,13 +184,15 @@ fn on_player_spawned_client_system(
                 },
                 ..default()
             }
-        );
+        )
+        .log_components();
     } 
 }
 
 pub fn server_move_2d(
     mut query: Query<(&NetworkPlayer, &mut NetworkTranslation2D)>,
     mut movements: EventReader<FromClient<NetworkMovement2DEvent>>,
+    mut movement_history: ResMut<PredictedEventHistory<NetworkMovement2DEvent>>,
     movement_params: Res<PlayerMovementParams>,
     player_entities: Res<PlayerEntityMap>,
     fixed_time: Res<Time<Fixed>>,
@@ -211,6 +214,7 @@ pub fn server_move_2d(
             Ok((p, mut net_t2d)) => {
                 debug_assert_eq!(p.client_id(), *client_id);
                 let delta_time = fixed_time.delta_seconds();
+                movement_history.insert(client_id.get(), event.clone(), tick.get(), delta_time);
                 move_2d(&mut net_t2d, event, &movement_params, delta_time);
                 debug!(
                     "client: {:?} server translation: {} on tick: {} delta time: {}", 
@@ -227,10 +231,14 @@ pub fn server_move_2d(
 
 pub fn client_move_2d(
     mut query: Query<(
-        Entity, &mut Transform,
-        &mut NetworkTranslation2D, &SnapshotBuffer<NetworkTranslation2D>,
+        Entity, 
+        &NetworkPlayer, 
+        &mut Transform,
+        &mut NetworkTranslation2D, 
+        &ComponentSnapshotBuffer<NetworkTranslation2D>,
     ), (
-        With<Predicted>, Without<Interpolated>
+        With<Predicted>, 
+        Without<Interpolated>
     )>,
     mut movements: EventReader<NetworkMovement2DEvent>,
     mut movement_history: ResMut<PredictedEventHistory<NetworkMovement2DEvent>>,
@@ -239,51 +247,61 @@ pub fn client_move_2d(
     fixed_time: Res<Time<Fixed>>,
     mut errors: EventWriter<NetstackError>
 ) {
-    for (e, mut t, mut net_t2d, net_t2d_buff) in query.iter_mut() {
-        let server_tick = match server_ticks.get(&e) {
-            Some(tick) => tick.get(),
-            None => {
-                errors.send(NetstackError(
-                    anyhow!("server tick should be stored for this entity: {e:?}")
-                ));
-                continue;
-            }
-        };
-
-        let delta_time = fixed_time.delta_seconds();
-        let mut client_t2d = net_t2d.clone();
-        for m in movements.read() {
-            movement_history.insert(m.clone(), server_tick, delta_time);
-            move_2d(&mut client_t2d, m, &movement_params, delta_time);
-            debug!("predicted translation: {}", client_t2d.0);
+    let (e, net_p, mut t, mut net_t2d, net_t2d_buff) = match query.get_single_mut() {
+        Ok((e, p, t, nt, b)) => (e, p, t, nt, b),
+        Err(QuerySingleError::NoEntities(_)) => {
+            return;
         }
-
-        let latest_snapshot = match net_t2d_buff.latest_snapshot() {
-            Some(s) => s,
-            None => {
-                net_t2d.0 = client_t2d.0;
-                t.translation = net_t2d.to_3d();
-                return;
-            }
-        };
-
-        let mut server_t2d = latest_snapshot.value().clone();
-        for m in movement_history.predict(latest_snapshot.tick()) {
-            move_2d(&mut server_t2d, m.value(), &movement_params, m.delta_time());
+        Err(QuerySingleError::MultipleEntities(e)) => {
+            errors.send(NetstackError(anyhow!(e)));
+            return;
         }
+    };
 
-        debug!("corrected translation: {}", server_t2d.0);
-        let prediction_error = server_t2d.0.distance(client_t2d.0);
-        info!("prediction error(length): {prediction_error}");
-        if prediction_error > movement_params.prediction_error_threashold {
-            net_t2d.0 = server_t2d.0;
-            warn!("client translation is overwritten by server");
-        } else {
-            net_t2d.0 = client_t2d.0;
+    let server_tick = match server_ticks.get(&e) {
+        Some(tick) => tick.get(),
+        None => {
+            errors.send(NetstackError(
+                anyhow!("server tick should be stored for this entity: {e:?}")
+            ));
+            return;
         }
+    };
 
-        t.translation = net_t2d.to_3d();        
+    let client_id = net_p.client_id().get();
+    let delta_time = fixed_time.delta_seconds();
+    let mut client_t2d = net_t2d.clone();
+    for m in movements.read() {
+        movement_history.insert(client_id, m.clone(), server_tick, delta_time);
+        move_2d(&mut client_t2d, m, &movement_params, delta_time);
+        debug!("predicted translation: {}", client_t2d.0);
     }
+
+    let latest_snapshot = match net_t2d_buff.latest_snapshot() {
+        Some(s) => s,
+        None => {
+            net_t2d.0 = client_t2d.0;
+            t.translation = net_t2d.to_3d();
+            return;
+        }
+    };
+
+    let mut server_t2d = latest_snapshot.value().clone();
+    for m in movement_history.frontier(client_id, latest_snapshot.tick()) {
+        move_2d(&mut server_t2d, m.value(), &movement_params, m.delta_time());
+    }
+    
+    debug!("corrected translation: {}", server_t2d.0);
+    let prediction_error = server_t2d.0.distance(client_t2d.0);
+    debug!("prediction error(length): {prediction_error}");
+    if prediction_error > movement_params.prediction_error_threashold {
+        net_t2d.0 = server_t2d.0;
+        warn!("client translation is overwritten by server");
+    } else {
+        net_t2d.0 = client_t2d.0;
+    }
+
+    t.translation = net_t2d.to_3d();
 }
 
 fn move_2d(

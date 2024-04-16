@@ -11,20 +11,10 @@ use bevy_net_dev::{
         error::panic_on_net_error_system
     }
 };
+use bevy_replicon_snap::RepliconSnapConfig;
 
 fn main() {
     App::new()
-    .add_plugins((
-        DefaultPlugins,
-        ClientNetstackPlugin{
-            network_tick_rate: DEV_NETWORK_TICK_RATE
-        }
-    ))
-    .add_plugins((
-        GamePlugin,
-        GameIoPlugin,
-        LevelPlugin
-    ))
     .insert_resource(ClientParams{
         client_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
         server_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -38,14 +28,27 @@ fn main() {
         user_data: get_dev_user_data(),
         token_expire_seconds: DEV_TOKEN_EXPIRE_SEC,
     })
-    // connection to server is not triggered automatically
-    .add_systems(Startup, setup_client)
-    .add_systems(Update, panic_on_net_error_system)
+    .insert_resource(RepliconSnapConfig{
+        max_tick_rate: DEV_NETWORK_TICK_RATE,
+        max_buffer_size: DEV_MAX_BUFFER_SIZE,
+    })
     .insert_resource(KeyboardInputActionMap{
         movement_up: KeyCode::KeyW,
         movement_left: KeyCode::KeyA,
         movement_down: KeyCode::KeyS,
         movement_right: KeyCode::KeyD,
     })
+    .add_plugins((
+        DefaultPlugins,
+        ClientNetstackPlugin
+    ))
+    .add_plugins((
+        GamePlugin,
+        GameIoPlugin,
+        LevelPlugin
+    ))
+    // connection to server is not triggered automatically
+    .add_systems(Startup, setup_client)
+    .add_systems(Update, panic_on_net_error_system)
     .run();
 }

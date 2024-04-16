@@ -8,7 +8,7 @@ use bevy_replicon_renet::{
     }, 
     RenetChannelsExt, RepliconRenetPlugins, RepliconRenetServerPlugin
 };
-use bevy_replicon_snap::SnapshotInterpolationPlugin;
+use bevy_replicon_snap::RepliconSnapPlugin;
 use super::{
     components::NetworkPlayer, 
     error::{on_transport_error_system, NetstackError}
@@ -30,18 +30,14 @@ pub struct ClientParams {
 #[derive(Resource)]
 pub struct Client;
 
-pub struct ClientNetstackPlugin {
-    pub network_tick_rate: u16
-}
+pub struct ClientNetstackPlugin;
 
 impl Plugin for ClientNetstackPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
             RepliconPlugins.build().disable::<ServerPlugin>(),
             RepliconRenetPlugins.build().disable::<RepliconRenetServerPlugin>(),
-            SnapshotInterpolationPlugin{
-                max_tick_rate: self.network_tick_rate
-            }
+            RepliconSnapPlugin
         ))
         .add_event::<NetstackError>()
         .replicate::<NetworkPlayer>()

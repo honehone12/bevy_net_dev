@@ -9,7 +9,7 @@ use bevy_replicon_renet::{
     RenetChannelsExt, RepliconRenetClientPlugin, RepliconRenetPlugins
 };
 use bevy_replicon_renet::renet::ClientId as RenetClientId;
-use bevy_replicon_snap::SnapshotInterpolationPlugin;
+use bevy_replicon_snap::RepliconSnapPlugin;
 use super::{
     components::{ServerNetworkPlayerInfo, NetworkPlayer}, 
     error::{on_transport_error_system, NetstackError}, 
@@ -19,6 +19,7 @@ use anyhow::anyhow;
 
 #[derive(Resource)]
 pub struct ServerParams {
+    pub network_tick_rate: u16,
     pub listen_addr: IpAddr,
     pub listen_port: u16,
     pub protocol_id: u64,
@@ -29,21 +30,18 @@ pub struct ServerParams {
 #[derive(Resource)]
 pub struct Server;
 
-pub struct ServerNetstackPlugin {
-    pub network_tick_rate: u16,
-}
+pub struct ServerNetstackPlugin;
 
 impl Plugin for ServerNetstackPlugin {
     fn build(&self, app: &mut App) {
+        let params = app.world.resource::<ServerParams>();
         app.add_plugins((
             RepliconPlugins.build().disable::<ClientPlugin>().set(ServerPlugin{
-                tick_policy: TickPolicy::MaxTickRate(self.network_tick_rate),
+                tick_policy: TickPolicy::MaxTickRate(params.network_tick_rate),
                 ..default()
             }),
             RepliconRenetPlugins.build().disable::<RepliconRenetClientPlugin>(),
-            SnapshotInterpolationPlugin{
-                max_tick_rate: self.network_tick_rate
-            }
+            RepliconSnapPlugin
         ))
         .add_event::<NetstackError>()
         .init_resource::<PlayerEntityMap>()
