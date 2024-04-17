@@ -11,11 +11,11 @@ use bevy_net_dev::{
         error::panic_on_net_error_system
     }
 };
-use bevy_replicon_snap::RepliconSnapConfig;
 
 fn main() {
     App::new()
     .insert_resource(ClientParams{
+        server_tick_rate: DEV_SERVER_TICK_RATE as u16,
         client_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
         server_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
         server_port: DEV_SERVER_LISTEN_PORT,
@@ -27,10 +27,6 @@ fn main() {
         // https://github.com/mas-bandwidth/netcode/blob/main/STANDARD.md
         user_data: get_dev_user_data(),
         token_expire_seconds: DEV_TOKEN_EXPIRE_SEC,
-    })
-    .insert_resource(RepliconSnapConfig{
-        max_tick_rate: DEV_NETWORK_TICK_RATE,
-        max_buffer_size: DEV_MAX_BUFFER_SIZE,
     })
     .insert_resource(KeyboardInputActionMap{
         movement_up: KeyCode::KeyW,

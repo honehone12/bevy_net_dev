@@ -1,20 +1,26 @@
 use bevy::{ecs::query::QuerySingleError, prelude::*};
-use bevy_replicon::{client::ServerEntityTicks, core::replicon_tick::RepliconTick, prelude::*};
-use bevy_replicon_snap::{
-    RepliconSnapExt, ComponentSnapshotBuffer, Interpolated, Predicted, PredictedEventHistory
+use bevy_replicon::{
+    client::ServerEntityTicks, 
+    core::replicon_tick::RepliconTick, 
+    prelude::*
 };
+use bevy_replicon_snap::prelude::*;
 use serde::{Serialize, Deserialize};
 use rand::prelude::*;
 use anyhow::anyhow;
-use crate::netstack::{
-    client::Client, 
-    components::{
-        MinimalNetworkTransform, NetworkPlayer, NetworkTranslation2D, NetworkYaw, OwnerControlled
-    }, 
-    error::NetstackError, 
-    events::NetworkMovement2DEvent, 
-    resources::PlayerEntityMap, 
-    server::Server
+use crate::{
+    dev::config::DEV_MAX_BUFFER_SIZE, 
+    netstack::{
+        client::Client, 
+        components::{
+            MinimalNetworkTransform, MinimalNetworkTransformSnapshots, 
+            NetworkPlayer, NetworkTranslation2D, NetworkYaw, Owner
+        }, 
+        error::NetstackError, 
+        events::NetworkMovement2DEvent, 
+        resources::PlayerEntityMap, 
+        server::Server
+    }
 };
 
 pub struct GamePlugin;
@@ -26,18 +32,21 @@ impl Plugin for GamePlugin {
             base_speed: 10.0,
             prediction_error_threashold: 0.5
         })
-        .replicate_interpolated::<NetworkTranslation2D>()
-        .replicate_interpolated::<NetworkYaw>()
+        .use_event_snapshots::<NetworkMovement2DEvent>(DEV_MAX_BUFFER_SIZE)
+        .add_client_event::<NetworkMovement2DEvent>(ChannelKind::Unreliable)
+        .interpolate_replication::<NetworkTranslation2D>()
+        .interpolate_replication::<NetworkYaw>()
+        
+        
         .replicate::<PlayerPresentation>()
-        .add_client_predicted_event::<NetworkMovement2DEvent>(ChannelKind::Unreliable)
         .add_systems(FixedUpdate, (
-            on_player_spawned_client_system, 
-            client_move_2d, 
+            client_on_player_spawned, 
+            client_move_2d_system, 
             apply_transform_presentation
         ).run_if(resource_exists::<Client>))
         .add_systems(FixedUpdate, (
-            on_player_spawned_server_system, 
-            server_move_2d
+            server_on_player_spawned, 
+            server_move_2d_system
         ).run_if(resource_exists::<Server>));
     }
 }
@@ -142,27 +151,30 @@ pub fn handle_action_event_system(
     }
 }
 
-fn on_player_spawned_server_system(
+fn server_on_player_spawned(
     mut commands: Commands,
-    query: Query<(Entity, &NetworkPlayer), Added<NetworkPlayer>>
+    q: Query<(Entity, &NetworkPlayer), Added<NetworkPlayer>>
 ) {
-    for (e, p) in query.iter() {
+    for (e, p) in q.iter() {
         info!("player: {:?} spawned, inserting network transform...", p.client_id());
         commands.entity(e)
         .insert((
-            MinimalNetworkTransform::default(), 
-            OwnerControlled::new(p.client_id().get()),
+            MinimalNetworkTransform::default(),
+            MinimalNetworkTransformSnapshots {
+                translation_snaps: ComponentSnapshotBuffer::new(DEV_MAX_BUFFER_SIZE),
+                rotation_snap: ComponentSnapshotBuffer::new(DEV_MAX_BUFFER_SIZE)
+            },
+            Owner::new(p.client_id().get()),
             PlayerPresentation::from_rand_color()
-        ))
-        .log_components();
+        ));
     }
 }
 
-fn on_player_spawned_client_system(
+fn client_on_player_spawned(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    query: Query<
+    q: Query<
         (Entity, 
             &NetworkPlayer, &PlayerPresentation, 
             &NetworkTranslation2D, &NetworkYaw
@@ -170,10 +182,10 @@ fn on_player_spawned_client_system(
         Added<NetworkPlayer>
     >
 ) {
-    for (e, p, s, t, y) in query.iter() {
+    for (e, p, s, t, y) in q.iter() {
         info!("player: {:?} spawned, inserting visual components...", p.client_id());
         commands.entity(e)
-        .insert(
+        .insert((
             PbrBundle{
                 mesh: meshes.add(Mesh::from(Capsule3d::default())),
                 material: materials.add(s.color),
@@ -183,16 +195,19 @@ fn on_player_spawned_client_system(
                     scale: Vec3::ONE
                 },
                 ..default()
+            },
+            MinimalNetworkTransformSnapshots {
+                translation_snaps: ComponentSnapshotBuffer::new(DEV_MAX_BUFFER_SIZE),
+                rotation_snap: ComponentSnapshotBuffer::new(DEV_MAX_BUFFER_SIZE)
             }
-        )
-        .log_components();
+        ));
     } 
 }
 
-pub fn server_move_2d(
+pub fn server_move_2d_system(
     mut query: Query<(&NetworkPlayer, &mut NetworkTranslation2D)>,
     mut movements: EventReader<FromClient<NetworkMovement2DEvent>>,
-    mut movement_history: ResMut<PredictedEventHistory<NetworkMovement2DEvent>>,
+    mut movement_history: ResMut<EventSnapshotHistory<NetworkMovement2DEvent>>,
     movement_params: Res<PlayerMovementParams>,
     player_entities: Res<PlayerEntityMap>,
     fixed_time: Res<Time<Fixed>>,
@@ -229,7 +244,7 @@ pub fn server_move_2d(
     }
 }
 
-pub fn client_move_2d(
+pub fn client_move_2d_system(
     mut query: Query<(
         Entity, 
         &NetworkPlayer, 
@@ -238,10 +253,10 @@ pub fn client_move_2d(
         &ComponentSnapshotBuffer<NetworkTranslation2D>,
     ), (
         With<Predicted>, 
-        Without<Interpolated>
+        With<OwnerControlling>
     )>,
     mut movements: EventReader<NetworkMovement2DEvent>,
-    mut movement_history: ResMut<PredictedEventHistory<NetworkMovement2DEvent>>,
+    mut movement_history: ResMut<EventSnapshotHistory<NetworkMovement2DEvent>>,
     movement_params: Res<PlayerMovementParams>,
     server_ticks: Res<ServerEntityTicks>,
     fixed_time: Res<Time<Fixed>>,
@@ -318,7 +333,7 @@ fn move_2d(
 fn apply_transform_presentation(
     mut query: Query<
         (&NetworkTranslation2D, &NetworkYaw, &mut Transform),
-        (With<Interpolated>, Without<Predicted>)
+        (With<Predicted>, Without<OwnerControlling>)
     >
 ) {
     for (net_t, _net_y, mut t) in query.iter_mut() {

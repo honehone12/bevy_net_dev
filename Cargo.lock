@@ -894,16 +894,7 @@ dependencies = [
  "bevy",
  "bevy_replicon",
  "bevy_replicon_renet",
- "bevy_replicon_snap_macros",
  "serde",
-]
-
-[[package]]
-name = "bevy_replicon_snap_macros"
-version = "0.2.0"
-dependencies = [
- "quote",
- "syn 2.0.58",
 ]
 
 [[package]]

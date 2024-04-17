@@ -1,9 +1,6 @@
 use bevy::{prelude::*, utils::Uuid};
 use bevy_replicon::core::{ClientId, Replication};
-use bevy_replicon_snap::{
-    bevy_replicon_snap_macros::Interpolate, 
-    NetworkOwner, OwnerPredicted
-};
+use bevy_replicon_snap::prelude::*;
 use serde::{Serialize, Deserialize};
 
 // player component each client id has one
@@ -48,18 +45,18 @@ impl ServerNetworkPlayerInfo {
 
 // bundle for player controlled entities. each player can have many
 #[derive(Bundle)]
-pub struct OwnerControlled {
+pub struct Owner {
     pub owner: NetworkOwner,
     pub replication: Replication,
-    pub predicted: OwnerPredicted
+    pub predicted: Predicted
 }
 
-impl OwnerControlled {
+impl Owner {
     pub fn new(id: u64) -> Self {
         Self { 
             owner: NetworkOwner::new(id), 
             replication: Replication, 
-            predicted: OwnerPredicted 
+            predicted: Predicted 
         }
     }
 }
@@ -67,11 +64,23 @@ impl OwnerControlled {
 #[derive(Bundle, Default)]
 pub struct MinimalNetworkTransform {
     pub translation: NetworkTranslation2D,
-    pub rotation: NetworkYaw
+    pub rotation: NetworkYaw,
 }
 
-#[derive(Component, Interpolate, Serialize, Deserialize, Default, Clone)]
+#[derive(Bundle)]
+pub struct MinimalNetworkTransformSnapshots {
+    pub translation_snaps: ComponentSnapshotBuffer<NetworkTranslation2D>,
+    pub rotation_snap: ComponentSnapshotBuffer<NetworkYaw>
+}
+
+#[derive(Component, Serialize, Deserialize, Default, Clone)]
 pub struct NetworkTranslation2D(pub Vec2);
+
+impl Interpolate for NetworkTranslation2D {
+    fn interpolate(&self, other: &Self, t: f32) -> Self {
+        Self(self.0.lerp(other.0, t))
+    }
+}
 
 impl NetworkTranslation2D {
     #[inline]
@@ -85,8 +94,14 @@ impl NetworkTranslation2D {
     }
 }
 
-#[derive(Component, Interpolate, Serialize, Deserialize, Default, Clone)]
+#[derive(Component, Serialize, Deserialize, Default, Clone)]
 pub struct NetworkYaw(pub f32);
+
+impl Interpolate for NetworkYaw {
+    fn interpolate(&self, other: &Self, t: f32) -> Self {
+        Self(self.0.lerp(other.0, t))
+    }
+}
 
 impl NetworkYaw {
     #[inline]
@@ -94,6 +109,7 @@ impl NetworkYaw {
         Self(quat.to_euler(EulerRot::YXZ).0)
     }
 
+    #[inline]
     pub fn to_3d(&self) -> Quat {
         Quat::from_rotation_y(self.0.to_radians())
     }

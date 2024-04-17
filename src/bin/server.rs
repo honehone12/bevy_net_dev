@@ -11,21 +11,17 @@ use bevy_net_dev::{
         server::{ServerNetstackPlugin, ServerParams}
     }
 };
-use bevy_replicon_snap::RepliconSnapConfig;
 
 fn main() {
     App::new()
     .insert_resource(ServerParams{
+        tick_rate: DEV_SERVER_TICK_RATE as u16,
         network_tick_rate: DEV_NETWORK_TICK_RATE,
         listen_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
         listen_port: DEV_SERVER_LISTEN_PORT,
         protocol_id: get_dev_protocol_id(),
         private_key: get_dev_private_key(),
         max_clients: DEV_SERVER_MAX_CLIENTS,
-    })
-    .insert_resource(RepliconSnapConfig{
-        max_tick_rate: DEV_NETWORK_TICK_RATE,
-        max_buffer_size: DEV_MAX_BUFFER_SIZE,
     })
     .add_plugins((
         MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(
