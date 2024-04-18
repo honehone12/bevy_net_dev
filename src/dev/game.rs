@@ -31,11 +31,20 @@ impl Plugin for GamePlugin {
             base_speed: 10.0,
             prediction_error_threashold: 0.5
         })
-        .use_event_snapshots::<NetworkMovement2DEvent>(DEV_MAX_BUFFER_SIZE)
+        .insert_resource(EventSnapshotHistory::<NetworkMovement2DEvent>::new(DEV_MAX_BUFFER_SIZE))
         .add_client_event::<NetworkMovement2DEvent>(ChannelKind::Unreliable)
+        
         .interpolate_replication::<NetworkTranslation2D>()
         .interpolate_replication::<NetworkYaw>()
         
+        .add_systems(FixedPreUpdate, (
+            client_populate_buffer::<NetworkTranslation2D>,
+            client_populate_buffer::<NetworkYaw>
+        ).run_if(resource_exists::<Client>))
+        .add_systems(FixedPostUpdate, (
+            server_populate_buffer::<NetworkTranslation2D>,
+            server_populate_buffer::<NetworkYaw>
+        ).run_if(resource_exists::<Server>))
         
         .replicate::<PlayerPresentation>()
         .add_systems(FixedUpdate, (
@@ -182,7 +191,8 @@ fn client_on_player_spawned(
             &NetworkTranslation2D, &NetworkYaw
         ), 
         Added<NetworkPlayer>
-    >
+    >,
+    client: Res<Client>
 ) {
     for (e, p, s, t, y) in query.iter() {
         info!("player: {:?} spawned", p.client_id());
@@ -204,6 +214,10 @@ fn client_on_player_spawned(
             },
             NetClient::default()
         ));
+
+        if p.client_id().get() == client.id() {
+            commands.entity(e).insert(OwnerControlling);
+        }
     } 
 }
 
@@ -297,7 +311,7 @@ pub fn client_move_2d_system(
 
     let client_id = net_p.client_id().get();
     let delta_time = fixed_time.delta_seconds();
-    let mut client_t2d = net_t2d.clone();
+    let mut client_t2d = NetworkTranslation2D::from_3d(t.translation);
     for m in movements.read() {
         movement_history.insert(client_id, m.clone(), server_tick, delta_time);
         move_2d(&mut client_t2d, m, &movement_params, delta_time);
@@ -322,13 +336,11 @@ pub fn client_move_2d_system(
     let prediction_error = server_t2d.0.distance(client_t2d.0);
     debug!("prediction error(length): {prediction_error}");
     if prediction_error > movement_params.prediction_error_threashold {
-        net_t2d.0 = server_t2d.0;
+        t.translation = server_t2d.to_3d();
         warn!("client translation is overwritten by server");
     } else {
-        net_t2d.0 = client_t2d.0;
+        t.translation = client_t2d.to_3d();
     }
-
-    t.translation = net_t2d.to_3d();
 }
 
 fn move_2d(

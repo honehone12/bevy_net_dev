@@ -29,7 +29,14 @@ pub struct ClientParams {
 }
 
 #[derive(Resource)]
-pub struct Client;
+pub struct Client(u64);
+
+impl Client {
+    #[inline]
+    pub fn id(&self) -> u64 {
+        self.0
+    }
+}
 
 pub struct ClientNetstackPlugin;
 
@@ -68,9 +75,10 @@ pub fn setup_client(
             return;
         }
     };
+    let client = Client(params.client_id);
 
     commands.remove_resource::<ClientParams>();
-    commands.insert_resource(Client);
+    commands.insert_resource(client);
     commands.insert_resource(renet_client);
     commands.insert_resource(netcode_transport);
 }
