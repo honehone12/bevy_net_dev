@@ -48,6 +48,10 @@ impl ServerNetworkPlayerInfo {
 pub struct Owner {
     pub owner: NetworkOwner,
     pub replication: Replication,
+}
+
+#[derive(Bundle, Default)]
+pub struct NetClient {
     pub interpolation: InterpolatedReplication,
     pub prediction: ClientPrediction
 }
@@ -56,9 +60,7 @@ impl Owner {
     pub fn new(id: u64) -> Self {
         Self { 
             owner: NetworkOwner::new(id), 
-            replication: Replication, 
-            interpolation: InterpolatedReplication,
-            prediction: ClientPrediction 
+            replication: Replication 
         }
     }
 }

@@ -13,8 +13,7 @@ use crate::{
     netstack::{
         client::Client, 
         components::{
-            MinimalNetworkTransform, MinimalNetworkTransformSnapshots, 
-            NetworkPlayer, NetworkTranslation2D, NetworkYaw, Owner
+            MinimalNetworkTransform, MinimalNetworkTransformSnapshots, NetClient, NetworkPlayer, NetworkTranslation2D, NetworkYaw, Owner
         }, 
         error::NetstackError, 
         events::NetworkMovement2DEvent, 
@@ -159,7 +158,7 @@ fn server_on_player_spawned(
     query: Query<(Entity, &NetworkPlayer), Added<NetworkPlayer>>
 ) {
     for (e, p) in query.iter() {
-        info!("player: {:?} spawned, inserting network transform...", p.client_id());
+        info!("player: {:?} spawned", p.client_id());
         commands.entity(e)
         .insert((
             MinimalNetworkTransform::default(),
@@ -186,7 +185,7 @@ fn client_on_player_spawned(
     >
 ) {
     for (e, p, s, t, y) in query.iter() {
-        info!("player: {:?} spawned, inserting visual components...", p.client_id());
+        info!("player: {:?} spawned", p.client_id());
         commands.entity(e)
         .insert((
             PbrBundle{
@@ -202,7 +201,8 @@ fn client_on_player_spawned(
             MinimalNetworkTransformSnapshots {
                 translation_snaps: ComponentSnapshotBuffer::new(DEV_MAX_BUFFER_SIZE),
                 rotation_snap: ComponentSnapshotBuffer::new(DEV_MAX_BUFFER_SIZE)
-            }
+            },
+            NetClient::default()
         ));
     } 
 }
