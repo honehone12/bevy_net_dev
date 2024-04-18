@@ -48,7 +48,8 @@ impl ServerNetworkPlayerInfo {
 pub struct Owner {
     pub owner: NetworkOwner,
     pub replication: Replication,
-    pub predicted: Predicted
+    pub interpolation: InterpolatedReplication,
+    pub prediction: ClientPrediction
 }
 
 impl Owner {
@@ -56,7 +57,8 @@ impl Owner {
         Self { 
             owner: NetworkOwner::new(id), 
             replication: Replication, 
-            predicted: Predicted 
+            interpolation: InterpolatedReplication,
+            prediction: ClientPrediction 
         }
     }
 }

@@ -18,7 +18,7 @@ use crate::{
         }, 
         error::NetstackError, 
         events::NetworkMovement2DEvent, 
-        resources::PlayerEntityMap, 
+        resources::{NetworkMovementIndex, PlayerEntityMap}, 
         server::Server
     }
 };
@@ -56,6 +56,7 @@ pub struct GameIoPlugin;
 impl Plugin for GameIoPlugin {
     fn build(&self, app: &mut App) {
         app
+        .init_resource::<NetworkMovementIndex>()
         .add_event::<ActionEvent>()
         .add_systems(Update, (
             handle_keyboard_input_system,
@@ -140,12 +141,14 @@ pub fn handle_keyboard_input_system(
 
 pub fn handle_action_event_system(
     mut actions: EventReader<ActionEvent>,
-    mut movements: EventWriter<NetworkMovement2DEvent>
+    mut movements: EventWriter<NetworkMovement2DEvent>,
+    mut movement_index: ResMut<NetworkMovementIndex>
 ) {
     for a in actions.read() {
         if a.has_movement() {
             movements.send(NetworkMovement2DEvent{
-                axis: a.movement_vec
+                axis: a.movement_vec,
+                nonce: movement_index.get()
             });
         }
     }
@@ -153,9 +156,9 @@ pub fn handle_action_event_system(
 
 fn server_on_player_spawned(
     mut commands: Commands,
-    q: Query<(Entity, &NetworkPlayer), Added<NetworkPlayer>>
+    query: Query<(Entity, &NetworkPlayer), Added<NetworkPlayer>>
 ) {
-    for (e, p) in q.iter() {
+    for (e, p) in query.iter() {
         info!("player: {:?} spawned, inserting network transform...", p.client_id());
         commands.entity(e)
         .insert((
@@ -174,7 +177,7 @@ fn client_on_player_spawned(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    q: Query<
+    query: Query<
         (Entity, 
             &NetworkPlayer, &PlayerPresentation, 
             &NetworkTranslation2D, &NetworkYaw
@@ -182,7 +185,7 @@ fn client_on_player_spawned(
         Added<NetworkPlayer>
     >
 ) {
-    for (e, p, s, t, y) in q.iter() {
+    for (e, p, s, t, y) in query.iter() {
         info!("player: {:?} spawned, inserting visual components...", p.client_id());
         commands.entity(e)
         .insert((
@@ -225,22 +228,31 @@ pub fn server_move_2d_system(
             }
         };
 
-        match query.get_mut(*entity) {
-            Ok((p, mut net_t2d)) => {
-                debug_assert_eq!(p.client_id(), *client_id);
-                let delta_time = fixed_time.delta_seconds();
-                movement_history.insert(client_id.get(), event.clone(), tick.get(), delta_time);
-                move_2d(&mut net_t2d, event, &movement_params, delta_time);
-                debug!(
-                    "client: {:?} server translation: {} on tick: {} delta time: {}", 
-                    client_id, net_t2d.0, tick.get(), delta_time
-                );
-            }
+        let (p, mut net_t2d) = match query.get_mut(*entity) {
+            Ok(q) => q,
             Err(e) => {
                 errors.send(NetstackError(e.into()));
                 continue;
             }
+        };
+
+        debug_assert_eq!(p.client_id(), *client_id);
+        if let Some(buff) = movement_history.history(client_id.get()) {
+            if let Some(snap) = buff.latest_snapshot() {
+                if event.nonce <= snap.value().nonce {
+                    warn!("discarding a old input, and will affect to replication");
+                    continue;
+                }
+            }
         }
+        
+        let delta_time = fixed_time.delta_seconds();
+        movement_history.insert(client_id.get(), event.clone(), tick.get(), delta_time);
+        move_2d(&mut net_t2d, event, &movement_params, delta_time);
+        debug!(
+            "client: {:?} server translation: {} on tick: {} delta time: {}", 
+            client_id, net_t2d.0, tick.get(), delta_time
+        );
     }
 }
 
@@ -252,7 +264,7 @@ pub fn client_move_2d_system(
         &mut NetworkTranslation2D, 
         &ComponentSnapshotBuffer<NetworkTranslation2D>,
     ), (
-        With<Predicted>, 
+        With<ClientPrediction>, 
         With<OwnerControlling>
     )>,
     mut movements: EventReader<NetworkMovement2DEvent>,
@@ -333,7 +345,7 @@ fn move_2d(
 fn apply_transform_presentation(
     mut query: Query<
         (&NetworkTranslation2D, &NetworkYaw, &mut Transform),
-        (With<Predicted>, Without<OwnerControlling>)
+        (With<ClientPrediction>, Without<OwnerControlling>)
     >
 ) {
     for (net_t, _net_y, mut t) in query.iter_mut() {

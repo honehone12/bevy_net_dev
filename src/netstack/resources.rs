@@ -2,6 +2,18 @@ use bevy::{prelude::*, utils::HashMap};
 use bevy_replicon::core::ClientId;
 use anyhow::bail;
 
+#[derive(Resource, Default)]
+pub struct NetworkMovementIndex(u64);
+
+impl NetworkMovementIndex {
+    #[inline]
+    pub fn get(&mut self) -> u64 {
+        let i = self.0;
+        self.0 = i + 1;
+        i
+    }
+}
+
 // map for entity with network player component
 #[derive(Resource, Default)]
 pub struct PlayerEntityMap(HashMap<ClientId, Entity>);
