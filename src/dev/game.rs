@@ -1,4 +1,4 @@
-use bevy::{ecs::query::QuerySingleError, prelude::*};
+use bevy::prelude::*;
 use bevy_replicon::{
     client::ServerEntityTicks, 
     core::replicon_tick::RepliconTick, 
@@ -13,11 +13,11 @@ use crate::{
     netstack::{
         client::Client, 
         components::{
-            MinimalNetworkTransform, MinimalNetworkTransformSnapshots, NetClient, NetworkPlayer, NetworkTranslation2D, NetworkYaw, Owner
+            MinimalNetworkTransform, MinimalNetworkTransformSnapshots, 
+            NetClient, NetworkPlayer, NetworkTranslation2D, NetworkYaw, Owner
         }, 
         error::NetstackError, 
-        events::NetworkMovement2DEvent, 
-        resources::{NetworkMovementIndex, PlayerEntityMap}, 
+        events::NetworkMovement2DEvent,
         server::Server
     }
 };
@@ -29,22 +29,16 @@ impl Plugin for GamePlugin {
         app
         .insert_resource(PlayerMovementParams{
             base_speed: 10.0,
-            prediction_error_threashold: 0.5
+            prediction_error_threashold: 1.0
         })
-        .insert_resource(EventSnapshotHistory::<NetworkMovement2DEvent>::new(DEV_MAX_BUFFER_SIZE))
-        .add_client_event::<NetworkMovement2DEvent>(ChannelKind::Unreliable)
-        
+        .use_client_event_snapshots::<NetworkMovement2DEvent>(
+            ChannelKind::Unreliable, 
+            DEV_MAX_BUFFER_SIZE
+        )
+        .use_component_snapshot::<NetworkTranslation2D>()
+        .use_component_snapshot::<NetworkYaw>()
         .interpolate_replication::<NetworkTranslation2D>()
         .interpolate_replication::<NetworkYaw>()
-        
-        .add_systems(FixedPreUpdate, (
-            client_populate_buffer::<NetworkTranslation2D>,
-            client_populate_buffer::<NetworkYaw>
-        ).run_if(resource_exists::<Client>))
-        .add_systems(FixedPostUpdate, (
-            server_populate_buffer::<NetworkTranslation2D>,
-            server_populate_buffer::<NetworkYaw>
-        ).run_if(resource_exists::<Server>))
         
         .replicate::<PlayerPresentation>()
         .add_systems(FixedUpdate, (
@@ -64,12 +58,11 @@ pub struct GameIoPlugin;
 impl Plugin for GameIoPlugin {
     fn build(&self, app: &mut App) {
         app
-        .init_resource::<NetworkMovementIndex>()
         .add_event::<ActionEvent>()
         .add_systems(Update, (
             handle_keyboard_input_system,
             handle_action_event_system
-        ));
+        ).chain());
     }
 }
 
@@ -123,7 +116,7 @@ impl ActionEvent {
     }
 }
 
-pub fn handle_keyboard_input_system(
+fn handle_keyboard_input_system(
     key_board: Res<ButtonInput<KeyCode>>,
     action_map: Res<KeyboardInputActionMap>,
     mut actions: EventWriter<ActionEvent> 
@@ -147,16 +140,15 @@ pub fn handle_keyboard_input_system(
     }
 } 
 
-pub fn handle_action_event_system(
+fn handle_action_event_system(
     mut actions: EventReader<ActionEvent>,
     mut movements: EventWriter<NetworkMovement2DEvent>,
-    mut movement_index: ResMut<NetworkMovementIndex>
 ) {
-    for a in actions.read() {
+    for (a, event_id) in actions.read_with_id() {
         if a.has_movement() {
             movements.send(NetworkMovement2DEvent{
                 axis: a.movement_vec,
-                nonce: movement_index.get()
+                index: event_id.id
             });
         }
     }
@@ -172,8 +164,8 @@ fn server_on_player_spawned(
         .insert((
             MinimalNetworkTransform::default(),
             MinimalNetworkTransformSnapshots {
-                translation_snaps: ComponentSnapshotBuffer::new(DEV_MAX_BUFFER_SIZE),
-                rotation_snap: ComponentSnapshotBuffer::new(DEV_MAX_BUFFER_SIZE)
+                translation_snaps: ComponentSnapshotBuffer::with_capacity(DEV_MAX_BUFFER_SIZE),
+                rotation_snap: ComponentSnapshotBuffer::with_capacity(DEV_MAX_BUFFER_SIZE)
             },
             Owner::new(p.client_id().get()),
             PlayerPresentation::from_rand_color()
@@ -209,9 +201,10 @@ fn client_on_player_spawned(
                 ..default()
             },
             MinimalNetworkTransformSnapshots {
-                translation_snaps: ComponentSnapshotBuffer::new(DEV_MAX_BUFFER_SIZE),
-                rotation_snap: ComponentSnapshotBuffer::new(DEV_MAX_BUFFER_SIZE)
+                translation_snaps: ComponentSnapshotBuffer::with_capacity(DEV_MAX_BUFFER_SIZE),
+                rotation_snap: ComponentSnapshotBuffer::with_capacity(DEV_MAX_BUFFER_SIZE)
             },
+            EventSnapshotBuffer::<NetworkMovement2DEvent>::new(DEV_MAX_BUFFER_SIZE),
             NetClient::default()
         ));
 
@@ -223,49 +216,26 @@ fn client_on_player_spawned(
 
 pub fn server_move_2d_system(
     mut query: Query<(&NetworkPlayer, &mut NetworkTranslation2D)>,
-    mut movements: EventReader<FromClient<NetworkMovement2DEvent>>,
-    mut movement_history: ResMut<EventSnapshotHistory<NetworkMovement2DEvent>>,
+    mut movement_snaps: ResMut<EventSnapshotClientMap<NetworkMovement2DEvent>>,
     movement_params: Res<PlayerMovementParams>,
-    player_entities: Res<PlayerEntityMap>,
     fixed_time: Res<Time<Fixed>>,
-    tick: Res<RepliconTick>,
-    mut errors: EventWriter<NetstackError>
+    replicon_tick: Res<RepliconTick>,
 ) {
-    for FromClient { client_id, event } in movements.read() {
-        let entity = match player_entities.get(client_id) {
-            Some(e) => e,
-            None => {
-                errors.send(NetstackError(
-                    anyhow!("client: {client_id:?} is not mapped for it's player entity")
-                ));
-                continue;
-            }
-        };
-
-        let (p, mut net_t2d) = match query.get_mut(*entity) {
-            Ok(q) => q,
-            Err(e) => {
-                errors.send(NetstackError(e.into()));
-                continue;
-            }
-        };
-
-        debug_assert_eq!(p.client_id(), *client_id);
-        if let Some(buff) = movement_history.history(client_id.get()) {
-            if let Some(snap) = buff.latest_snapshot() {
-                if event.nonce <= snap.value().nonce {
-                    warn!("discarding a old input, and will affect to replication");
-                    continue;
-                }
-            }
-        }
-        
+    for (net_p, mut net_t2d) in query.iter_mut() {
+        let client_id = net_p.client_id();
+        let tick = replicon_tick.get();
         let delta_time = fixed_time.delta_seconds();
-        movement_history.insert(client_id.get(), event.clone(), tick.get(), delta_time);
-        move_2d(&mut net_t2d, event, &movement_params, delta_time);
+        
+        movement_snaps.sort_with_id(&client_id);
+        let mut t2d = net_t2d.clone();
+        for movement in movement_snaps.frontier(&client_id) {
+            move_2d(&mut t2d, movement.event(), &movement_params, delta_time);
+        }
+        net_t2d.0 = t2d.0;
+
         debug!(
             "client: {:?} server translation: {} on tick: {} delta time: {}", 
-            client_id, net_t2d.0, tick.get(), delta_time
+            client_id, net_t2d.0, tick, delta_time
         );
     }
 }
@@ -273,73 +243,50 @@ pub fn server_move_2d_system(
 pub fn client_move_2d_system(
     mut query: Query<(
         Entity, 
-        &NetworkPlayer, 
         &mut Transform,
-        &mut NetworkTranslation2D, 
-        &ComponentSnapshotBuffer<NetworkTranslation2D>,
+        &NetworkTranslation2D, 
+        &mut EventSnapshotBuffer<NetworkMovement2DEvent>
     ), (
         With<ClientPrediction>, 
         With<OwnerControlling>
     )>,
-    mut movements: EventReader<NetworkMovement2DEvent>,
-    mut movement_history: ResMut<EventSnapshotHistory<NetworkMovement2DEvent>>,
     movement_params: Res<PlayerMovementParams>,
     server_ticks: Res<ServerEntityTicks>,
     fixed_time: Res<Time<Fixed>>,
     mut errors: EventWriter<NetstackError>
 ) {
-    let (e, net_p, mut t, mut net_t2d, net_t2d_buff) = match query.get_single_mut() {
-        Ok((e, p, t, nt, b)) => (e, p, t, nt, b),
-        Err(QuerySingleError::NoEntities(_)) => {
-            return;
+    for (e, mut t, net_t2d, mut movement_buff) in query.iter_mut() {
+        let server_tick = match server_ticks.get(&e) {
+            Some(tick) => tick.get(),
+            None => {
+                errors.send(NetstackError(
+                    anyhow!("server tick should be stored for this entity: {e:?}")
+                ));
+                continue;
+            }
+        };
+        let delta_time = fixed_time.delta_seconds();
+        
+        let mut client_t2d = NetworkTranslation2D::from_3d(t.translation);
+        movement_buff.sort_with_id();
+        for movement in movement_buff.frontier() {
+            move_2d(&mut client_t2d, movement.event(), &movement_params, delta_time);
         }
-        Err(QuerySingleError::MultipleEntities(e)) => {
-            errors.send(NetstackError(anyhow!(e)));
-            return;
+        debug!("predicted translation: {} on tick {}", client_t2d.0, server_tick);
+
+        let mut server_t2d = net_t2d.clone();
+        for movement in movement_buff.frontier() {
+            move_2d(&mut server_t2d, movement.event(), &movement_params, delta_time);    
         }
-    };
+        debug!("corrected translation: {} on tick {}", server_t2d.0, server_tick);
 
-    let server_tick = match server_ticks.get(&e) {
-        Some(tick) => tick.get(),
-        None => {
-            errors.send(NetstackError(
-                anyhow!("server tick should be stored for this entity: {e:?}")
-            ));
-            return;
+        let prediction_error = server_t2d.0.distance(client_t2d.0);
+        if prediction_error > movement_params.prediction_error_threashold {
+            t.translation = server_t2d.to_3d();
+            warn!("prediction error(length): {prediction_error} overwritten by server");
+        } else {
+            t.translation = client_t2d.to_3d();
         }
-    };
-
-    let client_id = net_p.client_id().get();
-    let delta_time = fixed_time.delta_seconds();
-    let mut client_t2d = NetworkTranslation2D::from_3d(t.translation);
-    for m in movements.read() {
-        movement_history.insert(client_id, m.clone(), server_tick, delta_time);
-        move_2d(&mut client_t2d, m, &movement_params, delta_time);
-        debug!("predicted translation: {}", client_t2d.0);
-    }
-
-    let latest_snapshot = match net_t2d_buff.latest_snapshot() {
-        Some(s) => s,
-        None => {
-            net_t2d.0 = client_t2d.0;
-            t.translation = net_t2d.to_3d();
-            return;
-        }
-    };
-
-    let mut server_t2d = latest_snapshot.value().clone();
-    for m in movement_history.frontier(client_id, latest_snapshot.tick()) {
-        move_2d(&mut server_t2d, m.value(), &movement_params, m.delta_time());
-    }
-    
-    debug!("corrected translation: {}", server_t2d.0);
-    let prediction_error = server_t2d.0.distance(client_t2d.0);
-    debug!("prediction error(length): {prediction_error}");
-    if prediction_error > movement_params.prediction_error_threashold {
-        t.translation = server_t2d.to_3d();
-        warn!("client translation is overwritten by server");
-    } else {
-        t.translation = client_t2d.to_3d();
     }
 }
 

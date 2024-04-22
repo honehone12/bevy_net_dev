@@ -5,6 +5,12 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
 [dependencies]
 bevy_replicon_snap = { version = "0.2.1", path = "../bevy_replicon_snap" }
 bevy_replicon_renet = { version = "0.1.0", path = "../bevy_replicon/bevy_replicon_renet" }
