@@ -17,7 +17,7 @@ use crate::{
             NetClient, NetworkPlayer, NetworkTranslation2D, NetworkYaw, Owner
         }, 
         error::NetstackError, 
-        events::NetworkMovement2DEvent,
+        events::{NetworkFireEvent, NetworkMovement2DEvent},
         server::Server
     }
 };
@@ -39,16 +39,21 @@ impl Plugin for GamePlugin {
         .use_component_snapshot::<NetworkYaw>()
         .interpolate_replication::<NetworkTranslation2D>()
         .interpolate_replication::<NetworkYaw>()
-        
+        .add_client_event::<NetworkFireEvent>(ChannelKind::Ordered)
         .replicate::<PlayerPresentation>()
-        .add_systems(FixedUpdate, (
-            client_on_player_spawned, 
-            client_move_2d_system, 
-            apply_transform_presentation
+        .add_systems(FixedUpdate, 
+            client_move_2d_system.run_if(resource_exists::<Client>)
+        )
+        .add_systems(Update, (
+            client_on_player_spawned,
+            apply_network_transform_system
         ).run_if(resource_exists::<Client>))
-        .add_systems(FixedUpdate, (
-            server_on_player_spawned, 
-            server_move_2d_system
+        .add_systems(FixedUpdate, 
+            server_move_2d_system.run_if(resource_exists::<Server>)
+        )
+        .add_systems(Update, (
+            server_on_player_spawned,
+            server_on_fire
         ).run_if(resource_exists::<Server>));
     }
 }
@@ -60,7 +65,7 @@ impl Plugin for GameIoPlugin {
         app
         .add_event::<ActionEvent>()
         .add_systems(Update, (
-            handle_keyboard_input_system,
+            handle_input_system,
             handle_action_event_system
         ).chain());
     }
@@ -98,9 +103,15 @@ pub struct KeyboardInputActionMap {
     pub movement_right: KeyCode
 }
 
+#[derive(Resource)]
+pub struct MouseInputActionMap {
+    pub fire: MouseButton
+}
+
 #[derive(Event, Default)]
 pub struct ActionEvent {
-    pub movement_vec: Vec2
+    pub movement_vec: Vec2,
+    pub is_fire: bool 
 }
 
 impl ActionEvent {
@@ -111,28 +122,33 @@ impl ActionEvent {
     
     #[inline]
     pub fn has_action(&self) -> bool {
-        // will have has_fire, has_jump or something else
-        self.has_movement()
+        self.has_movement() || self.is_fire
     }
 }
 
-fn handle_keyboard_input_system(
-    key_board: Res<ButtonInput<KeyCode>>,
-    action_map: Res<KeyboardInputActionMap>,
+fn handle_input_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    keyboard_action_map: Res<KeyboardInputActionMap>,
+    mouse_action_map: Res<MouseInputActionMap>,
     mut actions: EventWriter<ActionEvent> 
 ) {
     let mut action = ActionEvent::default();
-    if key_board.pressed(action_map.movement_up) {
+    if keyboard.pressed(keyboard_action_map.movement_up) {
         action.movement_vec.y += 1.0
     } 
-    if key_board.pressed(action_map.movement_down) {
+    if keyboard.pressed(keyboard_action_map.movement_down) {
         action.movement_vec.y -= 1.0
     }
-    if key_board.pressed(action_map.movement_right) {
+    if keyboard.pressed(keyboard_action_map.movement_right) {
         action.movement_vec.x += 1.0
     }
-    if key_board.pressed(action_map.movement_left) {
+    if keyboard.pressed(keyboard_action_map.movement_left) {
         action.movement_vec.x -= 1.0
+    }
+
+    if mouse.just_pressed(mouse_action_map.fire) {
+        action.is_fire = true;
     }
 
     if action.has_action() {
@@ -141,15 +157,29 @@ fn handle_keyboard_input_system(
 } 
 
 fn handle_action_event_system(
+    query: Query<(
+        &OwnerControlling,
+        &ComponentSnapshotBuffer<NetworkTranslation2D>,
+        &ComponentSnapshotBuffer<NetworkYaw>
+    )>,
     mut actions: EventReader<ActionEvent>,
     mut movements: EventWriter<NetworkMovement2DEvent>,
+    mut fires: EventWriter<NetworkFireEvent>
 ) {
-    for (a, event_id) in actions.read_with_id() {
-        if a.has_movement() {
-            movements.send(NetworkMovement2DEvent{
-                axis: a.movement_vec,
-                index: event_id.id
-            });
+    if let Ok((_, net_t2d_buff, net_yaw_buff)) = query.get_single() {
+        for (a, event_id) in actions.read_with_id() {
+            if a.has_movement() {
+                movements.send(NetworkMovement2DEvent{
+                    axis: a.movement_vec,
+                    index: event_id.id
+                });
+            }
+            if a.is_fire {
+                fires.send(NetworkFireEvent{
+                    network_translation_tick: net_t2d_buff.latest_snapshot_tick(),
+                    network_yaw_tick: net_yaw_buff.latest_snapshot_tick()
+                });
+            }
         }
     }
 }
@@ -177,11 +207,11 @@ fn client_on_player_spawned(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    query: Query<
-        (Entity, 
-            &NetworkPlayer, &PlayerPresentation, 
-            &NetworkTranslation2D, &NetworkYaw
-        ), 
+    query: Query<(
+        Entity, 
+        &NetworkPlayer, &PlayerPresentation, 
+        &NetworkTranslation2D, &NetworkYaw
+    ), 
         Added<NetworkPlayer>
     >,
     client: Res<Client>
@@ -223,12 +253,18 @@ pub fn server_move_2d_system(
 ) {
     for (net_p, mut net_t2d) in query.iter_mut() {
         let client_id = net_p.client_id();
+        
+        movement_snaps.sort_with_id(&client_id);
+        let frontier = movement_snaps.frontier(&client_id);
+        if frontier.len() == 0 {
+            continue;
+        }
+        
         let tick = replicon_tick.get();
         let delta_time = fixed_time.delta_seconds();
         
-        movement_snaps.sort_with_id(&client_id);
         let mut t2d = net_t2d.clone();
-        for movement in movement_snaps.frontier(&client_id) {
+        for movement in frontier {
             move_2d(&mut t2d, movement.event(), &movement_params, delta_time);
         }
         net_t2d.0 = t2d.0;
@@ -256,6 +292,11 @@ pub fn client_move_2d_system(
     mut errors: EventWriter<NetstackError>
 ) {
     for (e, mut t, net_t2d, mut movement_buff) in query.iter_mut() {
+        let frontier = movement_buff.frontier();
+        if frontier.len() == 0 {
+            continue;
+        }
+
         let server_tick = match server_ticks.get(&e) {
             Some(tick) => tick.get(),
             None => {
@@ -268,16 +309,14 @@ pub fn client_move_2d_system(
         let delta_time = fixed_time.delta_seconds();
         
         let mut client_t2d = NetworkTranslation2D::from_3d(t.translation);
-        movement_buff.sort_with_id();
-        for movement in movement_buff.frontier() {
-            move_2d(&mut client_t2d, movement.event(), &movement_params, delta_time);
+        let mut server_t2d = net_t2d.clone();
+
+        for movement in frontier {
+            let event = movement.event();
+            move_2d(&mut client_t2d, event, &movement_params, delta_time);
+            move_2d(&mut server_t2d, event, &movement_params, delta_time);
         }
         debug!("predicted translation: {} on tick {}", client_t2d.0, server_tick);
-
-        let mut server_t2d = net_t2d.clone();
-        for movement in movement_buff.frontier() {
-            move_2d(&mut server_t2d, movement.event(), &movement_params, delta_time);    
-        }
         debug!("corrected translation: {} on tick {}", server_t2d.0, server_tick);
 
         let prediction_error = server_t2d.0.distance(client_t2d.0);
@@ -301,7 +340,7 @@ fn move_2d(
     translation.0 += dir * (params.base_speed * delta_time); 
 }
 
-fn apply_transform_presentation(
+fn apply_network_transform_system(
     mut query: Query<
         (&NetworkTranslation2D, &NetworkYaw, &mut Transform),
         (With<ClientPrediction>, Without<OwnerControlling>)
@@ -309,5 +348,32 @@ fn apply_transform_presentation(
 ) {
     for (net_t, _net_y, mut t) in query.iter_mut() {
         t.translation = net_t.to_3d();
+    }
+}
+
+fn server_on_fire(
+    query: Query<(
+        &ComponentSnapshotBuffer<NetworkTranslation2D>,
+        &ComponentSnapshotBuffer<NetworkYaw>
+)   >,
+    mut fires: EventReader<FromClient<NetworkFireEvent>>
+) {
+    for FromClient { client_id, event } in fires.read() {
+        info!(
+            "player: {client_id:?} fired at it's translation tick: {} yaw tick: {}",
+            event.network_translation_tick, 
+            event.network_yaw_tick
+        );
+
+        for (net_t2d_buff, net_yaw_buff) in query.iter() {
+            let t2d_filter = net_t2d_buff.iter()
+            .filter(|s| s.tick() == event.network_translation_tick);
+            info!("translation filtered with tick, {} found", t2d_filter.count());
+
+
+            let yaw_fileter = net_yaw_buff.iter()
+            .filter(|s| s.tick() == event.network_yaw_tick);
+            info!("yaw filtered with tick, {} found", yaw_fileter.count());
+        }
     }
 }

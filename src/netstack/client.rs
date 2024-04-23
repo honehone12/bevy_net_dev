@@ -15,7 +15,7 @@ use super::{
 };
 
 #[derive(Resource)]
-pub struct ClientParams {
+pub struct ClientConfig {
     pub server_tick_rate: u16,
     pub client_addr: IpAddr,
     pub server_addr: IpAddr,
@@ -42,7 +42,7 @@ pub struct ClientNetstackPlugin;
 
 impl Plugin for ClientNetstackPlugin {
     fn build(&self, app: &mut App) {
-        let params = app.world.resource::<ClientParams>();
+        let params = app.world.resource::<ClientConfig>();
         app.add_plugins((
             RepliconPlugins.build().disable::<ServerPlugin>(),
             RepliconRenetPlugins.build().disable::<RepliconRenetServerPlugin>(),
@@ -59,7 +59,7 @@ impl Plugin for ClientNetstackPlugin {
 pub fn setup_client(
     mut commands: Commands,
     net_channels: Res<RepliconChannels>,
-    params: Res<ClientParams>,
+    config: Res<ClientConfig>,
     mut errors: EventWriter<NetstackError>
 ) {
     let renet_client = RenetClient::new(ConnectionConfig{
@@ -68,34 +68,34 @@ pub fn setup_client(
         ..default()
     });
 
-    let netcode_transport = match setup_transport(&params) {
+    let netcode_transport = match setup_transport(&config) {
         Ok(t) => t,
         Err(e) => {
             errors.send(NetstackError(e));
             return;
         }
     };
-    let client = Client(params.client_id);
+    let client = Client(config.client_id);
 
-    commands.remove_resource::<ClientParams>();
+    commands.remove_resource::<ClientConfig>();
     commands.insert_resource(client);
     commands.insert_resource(renet_client);
     commands.insert_resource(netcode_transport);
 }
 
-fn setup_transport(params: &ClientParams) 
+fn setup_transport(config: &ClientConfig) 
 -> anyhow::Result<NetcodeClientTransport> {
     let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
-    let socket = UdpSocket::bind((params.client_addr, 0))?;
+    let socket = UdpSocket::bind((config.client_addr, 0))?;
     let connect_token = ConnectToken::generate(
         current_time,
-        params.protocol_id,
-        params.token_expire_seconds,
-        params.client_id,
-        params.timeout_seconds,
-        vec![SocketAddr::new(params.server_addr, params.server_port)],
-        Some(&params.user_data),
-        &params.private_key
+        config.protocol_id,
+        config.token_expire_seconds,
+        config.client_id,
+        config.timeout_seconds,
+        vec![SocketAddr::new(config.server_addr, config.server_port)],
+        Some(&config.user_data),
+        &config.private_key
     )?;
     let auth = ClientAuthentication::Secure {connect_token};
     let netcode_transport = NetcodeClientTransport::new(current_time, auth, socket)?;

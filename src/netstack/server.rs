@@ -3,11 +3,12 @@ use bevy::{prelude::*, utils::Uuid};
 use bevy_replicon::prelude::*;
 use bevy_replicon_renet::{
     renet::{
-        transport::{NetcodeServerTransport, ServerAuthentication, ServerConfig}, 
+        transport::{NetcodeServerTransport, ServerAuthentication}, 
         ConnectionConfig, RenetServer
     }, 
     RenetChannelsExt, RepliconRenetClientPlugin, RepliconRenetPlugins
 };
+use bevy_replicon_renet::renet::transport::ServerConfig as RenetServerConfig;
 use bevy_replicon_renet::renet::ClientId as RenetClientId;
 use bevy_replicon_snap::RepliconSnapPlugin;
 use super::{
@@ -18,7 +19,7 @@ use super::{
 use anyhow::anyhow;
 
 #[derive(Resource)]
-pub struct ServerParams {
+pub struct ServerConfig {
     pub tick_rate: u16,
     pub network_tick_rate: u16,
     pub listen_addr: IpAddr,
@@ -35,7 +36,7 @@ pub struct ServerNetstackPlugin;
 
 impl Plugin for ServerNetstackPlugin {
     fn build(&self, app: &mut App) {
-        let params = app.world.resource::<ServerParams>();
+        let params = app.world.resource::<ServerConfig>();
         app.add_plugins((
             RepliconPlugins.build().disable::<ClientPlugin>().set(ServerPlugin{
                 tick_policy: TickPolicy::MaxTickRate(params.network_tick_rate),
@@ -61,7 +62,7 @@ impl Plugin for ServerNetstackPlugin {
 fn setup_server(
     mut commands: Commands, 
     net_channels: Res<RepliconChannels>,
-    params: Res<ServerParams>,
+    config: Res<ServerConfig>,
     mut errors: EventWriter<NetstackError>
 ) {
     let renet_server = RenetServer::new(ConnectionConfig{
@@ -70,7 +71,7 @@ fn setup_server(
         ..default()
     });
 
-    let netcode_transport = match setup_transport(&params) {
+    let netcode_transport = match setup_transport(&config) {
         Ok(t) => t,
         Err(e) => {
             errors.send(NetstackError(e));
@@ -78,24 +79,24 @@ fn setup_server(
         }
     };
 
-    info!("server is listening at {}:{}", params.listen_addr, params.listen_port);
-    commands.remove_resource::<ServerParams>();
+    info!("server is listening at {}:{}", config.listen_addr, config.listen_port);
+    commands.remove_resource::<ServerConfig>();
     commands.insert_resource(Server); 
     commands.insert_resource(renet_server);
     commands.insert_resource(netcode_transport);
 }
 
-fn setup_transport(params: &ServerParams) 
+fn setup_transport(config: &ServerConfig) 
 -> anyhow::Result<NetcodeServerTransport> {
-    let listen_addr = SocketAddr::new(params.listen_addr, params.listen_port);
+    let listen_addr = SocketAddr::new(config.listen_addr, config.listen_port);
     let socket = UdpSocket::bind(listen_addr)?;
     let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
-    let netcode_transport = NetcodeServerTransport::new(ServerConfig{
+    let netcode_transport = NetcodeServerTransport::new(RenetServerConfig{
         current_time,
-        max_clients: params.max_clients,
-        protocol_id: params.protocol_id,
+        max_clients: config.max_clients,
+        protocol_id: config.protocol_id,
         authentication: ServerAuthentication::Secure{ 
-            private_key: params.private_key
+            private_key: config.private_key
         },
         public_addresses: vec![listen_addr]
     }, socket)?;

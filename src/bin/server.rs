@@ -8,13 +8,13 @@ use bevy_net_dev::{
     },
     netstack::{ 
         error::panic_on_net_error_system,
-        server::{ServerNetstackPlugin, ServerParams}
+        server::{ServerNetstackPlugin, ServerConfig}
     }
 };
 
 fn main() {
     App::new()
-    .insert_resource(ServerParams{
+    .insert_resource(ServerConfig{
         tick_rate: DEV_SERVER_TICK_RATE as u16,
         network_tick_rate: DEV_NETWORK_TICK_RATE,
         listen_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),

@@ -13,3 +13,9 @@ impl IndexedEvent for NetworkMovement2DEvent {
         self.index
     }
 }
+
+#[derive(Event, Serialize, Deserialize, Clone)]
+pub struct NetworkFireEvent {
+    pub network_translation_tick: u32,
+    pub network_yaw_tick: u32
+}

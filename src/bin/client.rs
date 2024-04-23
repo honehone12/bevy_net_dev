@@ -3,18 +3,18 @@ use bevy::prelude::*;
 use bevy_net_dev::{
     dev::{
         config::*, 
-        game::{GameIoPlugin, GamePlugin, KeyboardInputActionMap}, 
+        game::{GameIoPlugin, GamePlugin, KeyboardInputActionMap, MouseInputActionMap}, 
         level::LevelPlugin
     }, 
     netstack::{
-        client::{setup_client, ClientNetstackPlugin, ClientParams}, 
+        client::{setup_client, ClientConfig, ClientNetstackPlugin}, 
         error::panic_on_net_error_system
     }
 };
 
 fn main() {
     App::new()
-    .insert_resource(ClientParams{
+    .insert_resource(ClientConfig{
         server_tick_rate: DEV_SERVER_TICK_RATE as u16,
         client_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
         server_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -33,6 +33,9 @@ fn main() {
         movement_left: KeyCode::KeyA,
         movement_down: KeyCode::KeyS,
         movement_right: KeyCode::KeyD,
+    })
+    .insert_resource(MouseInputActionMap{
+        fire: MouseButton::Left
     })
     .add_plugins((
         DefaultPlugins,
