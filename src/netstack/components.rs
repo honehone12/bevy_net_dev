@@ -74,7 +74,7 @@ pub struct MinimalNetworkTransform {
 #[derive(Bundle)]
 pub struct MinimalNetworkTransformSnapshots {
     pub translation_snaps: ComponentSnapshotBuffer<NetworkTranslation2D>,
-    pub rotation_snap: ComponentSnapshotBuffer<NetworkYaw>
+    pub rotation_snaps: ComponentSnapshotBuffer<NetworkYaw>
 }
 
 #[derive(Component, Serialize, Deserialize, Default, Clone)]

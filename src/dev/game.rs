@@ -190,12 +190,18 @@ fn server_on_player_spawned(
 ) {
     for (e, p) in query.iter() {
         info!("player: {:?} spawned", p.client_id());
+        
+        let mut translation_snaps = ComponentSnapshotBuffer::with_capacity(DEV_MAX_BUFFER_SIZE);
+        translation_snaps.insert(default(), 0);
+        let mut rotation_snaps = ComponentSnapshotBuffer::with_capacity(DEV_MAX_BUFFER_SIZE); 
+        rotation_snaps.insert(default(), 0);
+
         commands.entity(e)
         .insert((
             MinimalNetworkTransform::default(),
             MinimalNetworkTransformSnapshots {
-                translation_snaps: ComponentSnapshotBuffer::with_capacity(DEV_MAX_BUFFER_SIZE),
-                rotation_snap: ComponentSnapshotBuffer::with_capacity(DEV_MAX_BUFFER_SIZE)
+                translation_snaps,
+                rotation_snaps
             },
             Owner::new(p.client_id().get()),
             PlayerPresentation::from_rand_color()
@@ -218,6 +224,12 @@ fn client_on_player_spawned(
 ) {
     for (e, p, s, t, y) in query.iter() {
         info!("player: {:?} spawned", p.client_id());
+        
+        let mut translation_snaps = ComponentSnapshotBuffer::with_capacity(DEV_MAX_BUFFER_SIZE);
+        translation_snaps.insert(default(), 0);
+        let mut rotation_snaps = ComponentSnapshotBuffer::with_capacity(DEV_MAX_BUFFER_SIZE); 
+        rotation_snaps.insert(default(), 0);
+
         commands.entity(e)
         .insert((
             PbrBundle{
@@ -231,8 +243,8 @@ fn client_on_player_spawned(
                 ..default()
             },
             MinimalNetworkTransformSnapshots {
-                translation_snaps: ComponentSnapshotBuffer::with_capacity(DEV_MAX_BUFFER_SIZE),
-                rotation_snap: ComponentSnapshotBuffer::with_capacity(DEV_MAX_BUFFER_SIZE)
+                translation_snaps,
+                rotation_snaps
             },
             EventSnapshotBuffer::<NetworkMovement2DEvent>::new(DEV_MAX_BUFFER_SIZE),
             NetClient::default()
@@ -366,14 +378,43 @@ fn server_on_fire(
         );
 
         for (net_t2d_buff, net_yaw_buff) in query.iter() {
-            let t2d_filter = net_t2d_buff.iter()
-            .filter(|s| s.tick() == event.network_translation_tick);
-            info!("translation filtered with tick, {} found", t2d_filter.count());
+            let net_t2d_idx = match net_t2d_buff.iter()
+            .rposition(|s| s.tick() <= event.network_translation_tick) {
+                Some(idx) => idx, 
+                None => {
+                    if cfg!(debug_assertions) {
+                        panic!("translation buffer is empty");
+                    } else {
+                        warn!("translation buffer is empty, ignoring...");
+                        return;
+                    }
+                }
+            };
+            let net_t2d_snap = net_t2d_buff.get(net_t2d_idx)
+            .unwrap(); // must has some here
+            info!(
+                "found server translation: {:?} at tick: {}",
+                net_t2d_snap.component().0, net_t2d_snap.tick()
+            ); 
 
-
-            let yaw_fileter = net_yaw_buff.iter()
-            .filter(|s| s.tick() == event.network_yaw_tick);
-            info!("yaw filtered with tick, {} found", yaw_fileter.count());
+            let net_yaw_idx = match net_yaw_buff.iter()
+            .rposition(|s| s.tick() <= event.network_yaw_tick) {
+                Some(idx) => idx,
+                None => {
+                    if cfg!(debug_assertions) {
+                        panic!("yaw buffer is empty");
+                    } else {
+                        warn!("yaw buffer is empty, ignoring...");
+                        return;
+                    }
+                }
+            };
+            let net_yaw_snap = net_yaw_buff.get(net_yaw_idx)
+            .unwrap(); // must has some here
+            info!(
+                "found server yaw: {} at tick: {}",
+                net_yaw_snap.component().0, net_yaw_snap.tick()
+            );
         }
     }
 }
