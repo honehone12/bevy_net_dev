@@ -421,6 +421,8 @@ fn server_on_fire(
                 Some(idx) => idx, 
                 None => {
                     if cfg!(debug_assertions) {
+                        // here can happen on despawn
+                        // or buffer is small
                         panic!("translation buffer is empty");
                     } else {
                         warn!("translation buffer is empty, ignoring...");
@@ -436,6 +438,8 @@ fn server_on_fire(
                 Some(idx) => idx,
                 None => {
                     if cfg!(debug_assertions) {
+                        // here can happen on despawn
+                        // or buffer is small
                         panic!("yaw buffer is empty");
                     } else {
                         warn!("yaw buffer is empty, ignoring...");
