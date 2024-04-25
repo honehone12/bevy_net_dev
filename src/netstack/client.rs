@@ -16,7 +16,6 @@ use super::{
 
 #[derive(Resource)]
 pub struct ClientConfig {
-    pub server_tick_rate: u16,
     pub client_addr: IpAddr,
     pub server_addr: IpAddr,
     pub server_port: u16,
@@ -42,13 +41,10 @@ pub struct ClientNetstackPlugin;
 
 impl Plugin for ClientNetstackPlugin {
     fn build(&self, app: &mut App) {
-        let params = app.world.resource::<ClientConfig>();
         app.add_plugins((
             RepliconPlugins.build().disable::<ServerPlugin>(),
             RepliconRenetPlugins.build().disable::<RepliconRenetServerPlugin>(),
-            RepliconSnapPlugin{
-                server_tick_rate: params.server_tick_rate
-            }
+            RepliconSnapPlugin
         ))
         .add_event::<NetstackError>()
         .replicate::<NetworkPlayer>()

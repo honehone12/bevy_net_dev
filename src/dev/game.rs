@@ -9,7 +9,7 @@ use serde::{Serialize, Deserialize};
 use rand::prelude::*;
 use anyhow::anyhow;
 use crate::{
-    dev::config::DEV_MAX_BUFFER_SIZE, 
+    dev::config::{DEV_MAX_BUFFER_SIZE, DEV_NETWORK_TICK_DELTA}, 
     netstack::{
         client::Client, 
         components::{
@@ -37,10 +37,10 @@ impl Plugin for GamePlugin {
         )
         .use_component_snapshot::<NetworkTranslation2D>()
         .use_component_snapshot::<NetworkYaw>()
-        .interpolate_replication::<NetworkTranslation2D>()
-        .interpolate_replication::<NetworkYaw>()
         .add_client_event::<NetworkFireEvent>(ChannelKind::Ordered)
         .replicate::<PlayerPresentation>()
+        .replicate::<NetworkTranslation2D>()
+        .replicate::<NetworkYaw>()
         .add_systems(FixedUpdate, 
             client_move_2d_system.run_if(resource_exists::<Client>)
         )
@@ -353,13 +353,25 @@ fn move_2d(
 }
 
 fn apply_network_transform_system(
-    mut query: Query<
-        (&NetworkTranslation2D, &NetworkYaw, &mut Transform),
-        (With<ClientPrediction>, Without<OwnerControlling>)
-    >
+    mut query: Query<(
+        &mut Transform,
+        &NetworkTranslation2D, &ComponentSnapshotBuffer<NetworkTranslation2D>, 
+        &NetworkYaw, &ComponentSnapshotBuffer<NetworkYaw>
+    ), (
+        With<InterpolatedReplication>, With<ClientPrediction>, 
+        Without<OwnerControlling>
+    )>,
+    time: Res<Time>
 ) {
-    for (net_t, _net_y, mut t) in query.iter_mut() {
-        t.translation = net_t.to_3d();
+    for (mut t, net_t, net_t_buff, net_y, net_y_buff) in query.iter_mut() {
+        let delta_time = time.delta_seconds();
+        let mut interpolated_t = net_t.clone();
+        interpolate(&mut interpolated_t, net_t_buff, delta_time, DEV_NETWORK_TICK_DELTA);
+        let mut interpolated_y = net_y.clone();
+        interpolate(&mut interpolated_y, net_y_buff, delta_time, DEV_NETWORK_TICK_DELTA);
+
+        t.translation = interpolated_t.to_3d();
+        t.rotation = interpolated_y.to_3d();
     }
 }
 
@@ -391,11 +403,7 @@ fn server_on_fire(
                 }
             };
             let net_t2d_snap = net_t2d_buff.get(net_t2d_idx)
-            .unwrap(); // must has some here
-            info!(
-                "found server translation: {:?} at tick: {}",
-                net_t2d_snap.component().0, net_t2d_snap.tick()
-            ); 
+            .unwrap(); // must has some here 
 
             let net_yaw_idx = match net_yaw_buff.iter()
             .rposition(|s| s.tick() <= event.network_yaw_tick) {
@@ -411,9 +419,11 @@ fn server_on_fire(
             };
             let net_yaw_snap = net_yaw_buff.get(net_yaw_idx)
             .unwrap(); // must has some here
+
             info!(
-                "found server yaw: {} at tick: {}",
-                net_yaw_snap.component().0, net_yaw_snap.tick()
+                "found server transform, translation: {:?} at tick: {}, yaw: {} at tick: {}",
+                net_t2d_snap.component().0, net_t2d_snap.tick(),
+                net_yaw_snap.component().0, net_yaw_snap.tick(),
             );
         }
     }

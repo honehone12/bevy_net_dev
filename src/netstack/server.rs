@@ -20,7 +20,6 @@ use anyhow::anyhow;
 
 #[derive(Resource)]
 pub struct ServerConfig {
-    pub tick_rate: u16,
     pub network_tick_rate: u16,
     pub listen_addr: IpAddr,
     pub listen_port: u16,
@@ -43,9 +42,7 @@ impl Plugin for ServerNetstackPlugin {
                 ..default()
             }),
             RepliconRenetPlugins.build().disable::<RepliconRenetClientPlugin>(),
-            RepliconSnapPlugin{
-                server_tick_rate: params.tick_rate
-            }
+            RepliconSnapPlugin
         ))
         .add_event::<NetstackError>()
         .init_resource::<PlayerEntityMap>()

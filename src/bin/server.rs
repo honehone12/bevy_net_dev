@@ -15,7 +15,6 @@ use bevy_net_dev::{
 fn main() {
     App::new()
     .insert_resource(ServerConfig{
-        tick_rate: DEV_SERVER_TICK_RATE as u16,
         network_tick_rate: DEV_NETWORK_TICK_RATE,
         listen_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
         listen_port: DEV_SERVER_LISTEN_PORT,
