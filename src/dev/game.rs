@@ -186,15 +186,23 @@ fn handle_action_event_system(
 
 fn server_on_player_spawned(
     mut commands: Commands,
-    query: Query<(Entity, &NetworkPlayer), Added<NetworkPlayer>>
+    query: Query<(Entity, &NetworkPlayer), Added<NetworkPlayer>>,
+    replicon_tick: Res<RepliconTick>
 ) {
     for (e, p) in query.iter() {
-        info!("player: {:?} spawned", p.client_id());
+        let tick = replicon_tick.get();
+        info!("player: {:?} spawned at tick: {}", p.client_id(), tick);
         
         let mut translation_snaps = ComponentSnapshotBuffer::with_capacity(DEV_MAX_BUFFER_SIZE);
+        // this is for safety pushing older-than-any value
+        // other client's latest network tick can be much older than this new client
+        // (when they have not moved, synced for a while)
+        // this value is catched as latest old value for events from those clients
         translation_snaps.insert(default(), 0);
+        translation_snaps.insert(default(), tick);
         let mut rotation_snaps = ComponentSnapshotBuffer::with_capacity(DEV_MAX_BUFFER_SIZE); 
         rotation_snaps.insert(default(), 0);
+        rotation_snaps.insert(default(), tick);
 
         commands.entity(e)
         .insert((
@@ -220,24 +228,42 @@ fn client_on_player_spawned(
     ), 
         Added<NetworkPlayer>
     >,
-    client: Res<Client>
+    client: Res<Client>,
+    server_ticks: Res<ServerEntityTicks>
 ) {
-    for (e, p, s, t, y) in query.iter() {
-        info!("player: {:?} spawned", p.client_id());
+    for (e, p, presentation, net_t2d, net_yaw) in query.iter() {
+        let server_tick = match server_ticks.get(&e) {
+            Some(tick) => tick.get(),
+            None => {
+                if cfg!(debug_assertions) {
+                    panic!("server tick is not mapped for this entity: {e:?}");
+                } else {
+                    warn!("server tick is not mapped for this entity: {e:?}, discarding...");
+                    continue;
+                }
+            }
+        };
+        info!("player: {:?} spawned at tick: {}", p.client_id(), server_tick);
         
         let mut translation_snaps = ComponentSnapshotBuffer::with_capacity(DEV_MAX_BUFFER_SIZE);
-        translation_snaps.insert(default(), 0);
+        // this is for safety pushing older-than-any value
+        // other client's latest network tick can be much older than this new client
+        // (when they have not moved, synced for a while)
+        // this value is catched as latest old value for events from those clients
+        translation_snaps.insert(net_t2d.clone(), 0); 
+        translation_snaps.insert(net_t2d.clone(), server_tick);
         let mut rotation_snaps = ComponentSnapshotBuffer::with_capacity(DEV_MAX_BUFFER_SIZE); 
-        rotation_snaps.insert(default(), 0);
+        rotation_snaps.insert(net_yaw.clone(), 0);
+        rotation_snaps.insert(net_yaw.clone(), server_tick);
 
         commands.entity(e)
         .insert((
             PbrBundle{
                 mesh: meshes.add(Mesh::from(Capsule3d::default())),
-                material: materials.add(s.color),
+                material: materials.add(presentation.color),
                 transform: Transform{
-                    translation: t.to_3d(),
-                    rotation: y.to_3d(),
+                    translation: net_t2d.to_3d(),
+                    rotation: net_yaw.to_3d(),
                     scale: Vec3::ONE
                 },
                 ..default()
