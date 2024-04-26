@@ -421,12 +421,13 @@ fn server_on_fire(
                 Some(idx) => idx, 
                 None => {
                     if cfg!(debug_assertions) {
-                        // here can happen on despawn
-                        // or buffer is small
-                        panic!("translation buffer is empty");
+                        // here can happens because a client with very old snapshot fired
+                        // (means not moving for a while)
+                        warn!("translation buffer is empty");
+                        continue
                     } else {
                         warn!("translation buffer is empty, ignoring...");
-                        return;
+                        continue;
                     }
                 }
             };
@@ -438,12 +439,13 @@ fn server_on_fire(
                 Some(idx) => idx,
                 None => {
                     if cfg!(debug_assertions) {
-                        // here can happen on despawn
-                        // or buffer is small
-                        panic!("yaw buffer is empty");
+                        // here can happens because a client with very old snapshot fired
+                        // (means not moving for a while)
+                        warn!("yaw buffer is empty");
+                        continue
                     } else {
                         warn!("yaw buffer is empty, ignoring...");
-                        return;
+                        continue;
                     }
                 }
             };
