@@ -13,9 +13,9 @@ opt-level = 3
 
 [dependencies]
 bevy_replicon_snap = { version = "0.2.1", path = "../bevy_replicon_snap" }
-bevy_replicon_renet = { version = "0.1.0", path = "../bevy_replicon/bevy_replicon_renet" }
-bevy_replicon = { version = "0.24.1", path = "../bevy_replicon" }
-bevy = { version = "0.13.1" }
+bevy = "0.13.1"
 anyhow = "1.0.81"
 serde = "1.0.197"
 rand = "0.8.5"
+bevy_replicon = "0.24.1"
+bevy_replicon_renet = "0.1.0"

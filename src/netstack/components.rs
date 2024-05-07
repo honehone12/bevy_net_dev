@@ -1,5 +1,5 @@
 use bevy::{prelude::*, utils::Uuid};
-use bevy_replicon::core::{ClientId, Replication};
+use bevy_replicon::prelude::*;
 use bevy_replicon_snap::prelude::*;
 use serde::{Serialize, Deserialize};
 
